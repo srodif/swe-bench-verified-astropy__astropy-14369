@@ -100,6 +100,28 @@ def test_cds_grammar(strings, unit):
 
 
 @pytest.mark.parametrize(
+    "strings, unit",
+    [
+        # Test chained divisions - fix for issue #14369
+        (["10+3J/m/s/kpc2"], 1000 * u.J / (u.m * u.s * u.kpc**2)),
+        (["10-7J/s/kpc2"], 1e-7 * u.J / (u.s * u.kpc**2)),
+        (["J/m/s"], u.J / (u.m * u.s)),
+        (["erg/AA/s"], u.erg / (u.AA * u.s)),
+    ],
+)
+def test_cds_chained_divisions(strings, unit):
+    """Test that chained divisions in CDS format are parsed correctly.
+    
+    This tests the fix for issue #14369 where units like 10+3J/m/s/kpc2
+    were incorrectly parsed due to incorrect associativity of division operators.
+    """
+    for s in strings:
+        print(f"Testing chained division: {s}")
+        unit2 = u_format.CDS.parse(s)
+        assert unit2 == unit, f"Expected {unit}, got {unit2} for input '{s}'"
+
+
+@pytest.mark.parametrize(
     "string",
     [
         "0.1 nm",

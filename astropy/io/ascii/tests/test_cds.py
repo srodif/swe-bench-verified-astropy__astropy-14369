@@ -552,3 +552,60 @@ def test_write_skycoord_with_format():
     lines = lines[i_bbb:]  # Select Byte-By-Byte section and following lines.
     # Check the written table.
     assert lines == exp_output
+
+
+def test_cds_chained_division_units():
+    """
+    Test that chained divisions in CDS format MRT files are parsed correctly.
+    
+    This is a regression test for issue #14369 where units like 10+3J/m/s/kpc2
+    were incorrectly parsed as 1e+3 J kpc2 s / m instead of 1e+3 J / (m s kpc2).
+    """
+    from io import StringIO
+    
+    # Create MRT content with the problematic units from the issue
+    mrt_content = """Title: Test chained divisions
+Authors: Test
+Table: Test table
+================================================================================
+Byte-by-byte Description of file: test.dat
+--------------------------------------------------------------------------------
+   Bytes Format Units          Label      Explanations
+--------------------------------------------------------------------------------
+   1- 10 A10    ---            ID         Object ID
+  12- 21 F10.5  10+3J/m/s/kpc2 SBCONT     Continuum surface brightness
+  23- 32 F10.5  10-7J/s/kpc2   SBLINE     Line surface brightness  
+  34- 43 F10.5  erg/AA/s/kpc2  FLUX       Another test unit
+--------------------------------------------------------------------------------
+OBJ001     12.34567   98.76543   11.11111
+OBJ002     23.45678   87.65432   22.22222
+"""
+    
+    # Read the table
+    table = Table.read(StringIO(mrt_content), format='ascii.cds')
+    
+    # Check the units were parsed correctly
+    sbcont_unit = table['SBCONT'].unit
+    sbline_unit = table['SBLINE'].unit
+    flux_unit = table['FLUX'].unit
+    
+    print(f"SBCONT unit: {sbcont_unit}")
+    print(f"SBLINE unit: {sbline_unit}")
+    print(f"FLUX unit: {flux_unit}")
+    
+    # Test SBCONT: 10+3J/m/s/kpc2 should be 1000 * J / (m * s * kpc**2)
+    expected_sbcont = 1000 * u.J / (u.m * u.s * u.kpc**2)
+    assert sbcont_unit == expected_sbcont, f"SBCONT: expected {expected_sbcont}, got {sbcont_unit}"
+    
+    # Test SBLINE: 10-7J/s/kpc2 should be 1e-7 * J / (s * kpc**2)  
+    expected_sbline = 1e-7 * u.J / (u.s * u.kpc**2)
+    assert sbline_unit == expected_sbline, f"SBLINE: expected {expected_sbline}, got {sbline_unit}"
+    
+    # Test FLUX: erg/AA/s/kpc2 should be erg / (AA * s * kpc**2)
+    expected_flux = u.erg / (u.AA * u.s * u.kpc**2)
+    assert flux_unit == expected_flux, f"FLUX: expected {expected_flux}, got {flux_unit}"
+    
+    # Verify that the old incorrect behavior is not happening
+    # Before the fix, 10+3J/m/s/kpc2 was parsed as something like 1000 * J * kpc**2 * s / m
+    incorrect_sbcont = 1000 * u.J * u.kpc**2 * u.s / u.m  
+    assert sbcont_unit != incorrect_sbcont, f"SBCONT should not equal the old incorrect parsing: {incorrect_sbcont}"

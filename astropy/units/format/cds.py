@@ -187,7 +187,61 @@ class CDS(Base):
             if len(p) == 3:
                 p[0] = p[2] ** -1
             else:
-                p[0] = p[1] / p[3]
+                # Handle chained divisions: A/B/C/D should be A / (B * C * D)
+                # not A / (B / (C / D))
+                from astropy.units.core import CompositeUnit
+                
+                numerator = p[1]
+                denominator_part = p[3]
+                
+                # If the denominator part is itself a division (CompositeUnit with negative powers),
+                # we need to flatten the division chain
+                if (isinstance(denominator_part, CompositeUnit) and 
+                    len(denominator_part.bases) > 0 and 
+                    any(power < 0 for power in denominator_part.powers)):
+                    
+                    # Extract the numerator and denominators from the nested division
+                    nested_numerator = None
+                    nested_denominators = []
+                    
+                    for base, power in zip(denominator_part.bases, denominator_part.powers):
+                        if power > 0:
+                            # This base is in the numerator of the nested expression
+                            if nested_numerator is None:
+                                nested_numerator = base ** power
+                            else:
+                                nested_numerator *= base ** power
+                        else:
+                            # This base is in the denominator of the nested expression
+                            nested_denominators.append(base ** (-power))
+                    
+                    # For chained divisions A/B/C/D, we want A / (B * C * D)
+                    # If we have A / (B / C), it should become A / (B * C)
+                    if nested_numerator is not None:
+                        # The nested structure is B/C, we want to put both B and C in denominator
+                        all_denominators = [nested_numerator] + nested_denominators
+                    else:
+                        # The nested structure is just denominators
+                        all_denominators = nested_denominators
+                    
+                    # Multiply the scale factor if present
+                    scale = denominator_part.scale
+                    if scale != 1.0:
+                        # Apply the scale to the first denominator
+                        if all_denominators:
+                            all_denominators[0] = all_denominators[0] * scale
+                    
+                    # Create the final result: numerator / (all_denominators combined)
+                    if all_denominators:
+                        combined_denominator = all_denominators[0]
+                        for denom in all_denominators[1:]:
+                            combined_denominator *= denom
+                        p[0] = numerator / combined_denominator
+                    else:
+                        p[0] = numerator / denominator_part
+                else:
+                    # Simple division case
+                    p[0] = p[1] / p[3]
 
         def p_unit_expression(p):
             """
